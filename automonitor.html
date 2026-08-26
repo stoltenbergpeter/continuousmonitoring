@@ -1,157 +1,1971 @@
 <!DOCTYPE html>
-<html>
-<head>
-	<title>Agent Auto-Monitor</title>
-	
-	<link href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.1/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-WskhaSGFgHYWDcbwN70/dfYBj47jz9qbsMId/iRN3ewGhXQFZCSftd1LZCfmhktB" crossorigin="anonymous">
+<!-- Genesys Cloud supervisor auto-monitor app -->
+<html lang="en">
+  <head>
+    <meta name="robots" content="noindex" />
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="color-scheme" content="light" />
+    <title>Supervisor Auto Monitor | Franklin Templeton</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-	<style type="text/css">
-		.row {
-			margin-top: 8px;
-		}
-	</style>
+    <script id="genesysSdkScript" src="https://sdk-cdn.mypurecloud.com/javascript/latest/purecloud-platform-client-v2.min.js" defer></script>
 
-	<script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
-	<script src="https://sdk-cdn.mypurecloud.com/javascript/27.0.0/purecloud-platform-client-v2.min.js"></script>
+    <style>
+      :root {
+        --ft-blue: #002eb8;
+        --ft-blue-dark: #001f62;
+        --ft-blue-mid: #3b5fc4;
+        --ft-blue-soft: #e4ecf4;
+        --ft-teal: #1e7a75;
+        --ft-teal-dark: #093d44;
+        --ft-teal-soft: #d9f4f2;
+        --ft-gray: #293438;
+        --ft-gray-4: #606668;
+        --ft-gray-3: #939596;
+        --ft-gray-2: #c0c3c4;
+        --ft-gray-1: #ebeced;
+        --ft-maroon: #720e2d;
+        --page: #f7f8fa;
+        --surface: #ffffff;
+        --text: var(--ft-gray);
+        --muted: var(--ft-gray-4);
+        --border: #d8dcde;
+        --focus: #6a95d3;
+        --shadow: 0 12px 32px rgba(0, 31, 98, 0.08);
+        --radius-lg: 18px;
+        --radius-md: 10px;
+        --radius-sm: 6px;
+        --content-width: 1240px;
+      }
 
-	<script type="text/javascript">
-		// This client ID expects the redirect URL to be http://localhost:8080/
-		const clientId = '03379d99-5910-444e-bc5d-237bdffc1b9e';
-		const redirectUri = window.location.href;
+      * {
+        box-sizing: border-box;
+      }
 
-		// Set purecloud objects
-		const platformClient = require('platformClient');
-		const client = platformClient.ApiClient.instance;
-		const notificationsApi = new platformClient.NotificationsApi();
-		const routingApi = new platformClient.RoutingApi();
-		const conversationsApi = new platformClient.ConversationsApi();
+      html {
+        scroll-behavior: smooth;
+      }
 
-		// Set PureCloud settings
-		client.setEnvironment('mypurecloud.com');
-		client.setPersistSettings(true, 'BrianAutoMonitor');
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background: var(--page);
+        color: var(--text);
+        font-family: "TT Commons Pro", "Segoe UI", Arial, sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+        text-align: left;
+      }
 
-		// Local vars
-		let userConversationsTopic = '';
-		let webSocket = null;
-		let notificationChannel, monitoredAgent, conversationId, participantId;
+      button,
+      input,
+      select {
+        font: inherit;
+      }
 
-		$(document).ready(() => {
-			// Authenticate with PureCloud
-			client.loginImplicitGrant(clientId, redirectUri)
-			
-				.then(() => {
-					console.log('Logged in');
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      a:focus-visible {
+        outline: 3px solid var(--focus);
+        outline-offset: 3px;
+      }
 
-					// Get queues
-					return getQueues();
-				})
-				
-				.then((queuesListing) => {
-					console.log(`Found ${queuesListing.entities.length} queues`);
+      .skip-link {
+        position: fixed;
+        z-index: 1000;
+        top: 12px;
+        left: 12px;
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--ft-blue-dark);
+        color: #ffffff;
+        font-weight: 700;
+        text-decoration: none;
+        transform: translateY(-160%);
+        transition: transform 150ms ease;
+      }
 
-					// Create select option for each queue
-					queuesListing.entities.forEach((queue) => {
-						var option = document.createElement("option");
-						option.text = queue.name;	//user-friendly name
-						option.value = queue.id;		//PureCloud queueId
-						document.getElementById("queuesDropDown").add(option);
-					});
-				})
-				
-				.then(() => {
-					// Create notification channel
-					return notificationsApi.postNotificationsChannels();
-				})
-				
-				.then((channel) => {
-					console.log('channel: ', channel);
-					notificationChannel = channel;
+      .skip-link:focus {
+        transform: translateY(0);
+      }
 
-					// Set up web socket
-					webSocket = new WebSocket(notificationChannel.connectUri);
-					webSocket.onmessage = handleNotification;
-				})
+      .site-header {
+        border-top: 6px solid var(--ft-blue);
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
 
-				.catch((err) => console.error(err));
-		});
-		
-		//Retrieve up to 100 PureCloud queue objects
-		function getQueues() {
-			return routingApi.getRoutingQueues({"pageSize": "100"});
-		}
-		
-		//Retrieve up to 100 PureCloud members of given queue as user objects
-		function getAgents(queueId) {
-			return routingApi.getRoutingQueueUsers(queueId, {"pageSize": "100"});
-		}
-		
-		//Clear agents drop-down and refill with members of PureCloud queueId
-		function updateAgents(queueId) {
-			agentsDropDown = document.getElementById("agentsDropDown");
-			console.log(`Removing ${agentsDropDown.options.length} agents from menu`)
-			while (agentsDropDown.options.length) {
-				agentsDropDown.remove(0);
-			}
-			getAgents(queueId)
-			.then((agentsListing) => {
-				//Create select option for each agent
-				console.log(`Adding ${agentsListing.entities.length} agents to menu`)
-				agentsListing.entities.forEach((user) => {
-					var option = document.createElement("option");
-					option.text = user.name;		//user-friendly agent name
-					option.value = user.id;		//PureCloud userId
-					document.getElementById("agentsDropDown").add(option);
-				});
-			});
-		}
+      .site-header-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 28px;
+        width: min(var(--content-width), calc(100% - 48px));
+        min-height: 86px;
+        margin: 0 auto;
+      }
 
-		//Subscribe to conversation notifications for PureCloud userId
-		function setAgent(agentId) {
-			console.log(`Setting agent to (${agentId})`);
-			monitoredAgent = agentId;
-			userConversationsTopic = `v2.users.${monitoredAgent}.conversations`;
-			return notificationsApi.putNotificationsChannelSubscriptions(notificationChannel.id, [ { id: userConversationsTopic } ]);
-		}
+      .brand-block {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        min-width: 0;
+      }
 
-		// Handle incoming PureCloud notification from WebSocket
-		function handleNotification(message) {
-			// Parse notification string to a JSON object
-			const notification = JSON.parse(message.data);
+      .brand-name {
+        color: var(--ft-blue-dark);
+        font-size: 1rem;
+        font-weight: 750;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+      }
 
-			// Discard unwanted notifications
-			if (notification.topicName.toLowerCase() === 'channel.metadata') {
-				// Heartbeat
-				console.info('Ignoring metadata: ', notification);
-				return;
-			} else if (notification.topicName.toLowerCase() !== userConversationsTopic.toLowerCase()) {
-				// Unexpected topic
-				console.warn('Unknown notification: ', notification);
-				return;
-			} else {
-				console.debug('Conversation notification: ', notification);
-			}
+      .brand-divider {
+        width: 1px;
+        height: 34px;
+        background: var(--ft-gray-2);
+      }
 
-			//If this is the first connected notification for the agent participant, begin a silent monitor on call
-			if (notification.eventBody.participants.filter(participant => participant.purpose === "agent")[0].calls[0].state === "connected" && conversationId != notification.eventBody.id) {
-				conversationId = notification.eventBody.id;
-				participantId = notification.eventBody.participants.filter(participant => participant.purpose === "agent")[0].id;
-				console.info("participant.id: ", notification.eventBody.participants.filter(participant => participant.purpose === "agent")[0].id);
-				conversationsApi.postConversationsCallParticipantMonitor(conversationId, participantId)
-					.catch((err) => console.log(`${new Date().toLocaleTimeString()} - ${JSON.stringify(err,null,2)}`));
-			}
-		}
-		
+      .product-lockup {
+        min-width: 0;
+      }
 
-	</script>
-</head>
-<body>
-	<div class="container">
-		<div class="row">
-			<div class="col-sm-12">
-				<select id="queuesDropDown" onchange="updateAgents(this.value)"></select>
-				<select id="agentsDropDown" onchange="setAgent(this.value)"></select>
-			</div>
-		</div>
-	</div>
-</body>
+      .product-name {
+        color: var(--ft-gray);
+        font-size: 1.05rem;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+
+      .product-meta {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .session-summary {
+        min-width: 210px;
+        max-width: 420px;
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-align: right;
+      }
+
+      .session-summary strong {
+        display: block;
+        overflow: hidden;
+        color: var(--ft-blue-dark);
+        font-size: 0.9rem;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .session-summary span {
+        display: block;
+        margin-top: 2px;
+      }
+
+      main {
+        width: min(var(--content-width), calc(100% - 48px));
+        margin: 0 auto;
+        padding: 42px 0 56px;
+      }
+
+      .page-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 28px;
+        margin-bottom: 24px;
+      }
+
+      .page-heading-copy {
+        min-width: 0;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: var(--ft-blue);
+        font-size: 0.78rem;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .page-heading h1 {
+        margin: 0;
+        color: var(--ft-blue-dark);
+        font-size: clamp(2rem, 4vw, 3rem);
+        font-weight: 700;
+        letter-spacing: -0.025em;
+        line-height: 1.08;
+      }
+
+      .page-heading p:not(.eyebrow) {
+        max-width: 760px;
+        margin: 12px 0 0;
+        color: var(--muted);
+        font-size: 1.02rem;
+      }
+
+      .heading-actions,
+      .controls,
+      .inline-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .heading-actions {
+        flex: 0 0 auto;
+        justify-content: flex-end;
+      }
+
+      .card,
+      .metric-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .boot-error {
+        position: relative;
+        display: none;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 22px;
+        padding: 14px 16px 14px 18px;
+        border: 1px solid #d8a9b7;
+        border-left: 5px solid var(--ft-maroon);
+        border-radius: var(--radius-md);
+        background: #fcf5f7;
+        color: var(--ft-gray);
+        font-weight: 700;
+      }
+
+      .boot-error::before {
+        flex: 0 0 10px;
+        width: 10px;
+        height: 10px;
+        margin-top: 7px;
+        border-radius: 50%;
+        background: var(--ft-maroon);
+        content: "";
+      }
+
+      .boot-error.visible {
+        display: flex;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 22px;
+      }
+
+      .metric-card {
+        position: relative;
+        overflow: hidden;
+        padding: 22px 24px;
+        border-radius: var(--radius-md);
+        box-shadow: none;
+      }
+
+      .metric-card::before {
+        position: absolute;
+        top: 0;
+        right: 0;
+        left: 0;
+        height: 4px;
+        background: var(--ft-blue);
+        content: "";
+      }
+
+      .metric-card:nth-child(2)::before {
+        background: var(--ft-teal);
+      }
+
+      .metric-card:nth-child(3)::before {
+        background: var(--ft-gray-4);
+      }
+
+      .metric-card:nth-child(4)::before {
+        background: var(--ft-maroon);
+      }
+
+      .label,
+      .field label {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .metric {
+        display: block;
+        margin-top: 5px;
+        overflow-wrap: anywhere;
+        color: var(--ft-blue-dark);
+        font-size: clamp(1.45rem, 2.4vw, 2rem);
+        font-weight: 750;
+        line-height: 1.1;
+      }
+
+      .workspace {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+
+      .card {
+        padding: 24px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin: -24px -24px 22px;
+        padding: 21px 24px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .section-head h2,
+      .section-head h3 {
+        margin: 0;
+        color: var(--ft-blue-dark);
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .section-head h2 {
+        font-size: 1.4rem;
+      }
+
+      .section-head h3 {
+        font-size: 1.05rem;
+      }
+
+      .section-head .eyebrow {
+        margin-bottom: 5px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.18fr);
+        align-items: start;
+        gap: 22px;
+      }
+
+      .left-rail,
+      .main {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        min-width: 0;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      .settings-card .form-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .field label {
+        margin-bottom: 7px;
+      }
+
+      .input,
+      .select {
+        width: 100%;
+        min-height: 46px;
+        padding: 10px 12px;
+        border: 1px solid #aeb4b7;
+        border-radius: var(--radius-sm);
+        background: #ffffff;
+        color: var(--ft-gray);
+      }
+
+      .input:hover,
+      .select:hover {
+        border-color: var(--ft-gray-4);
+      }
+
+      .input:disabled,
+      .select:disabled {
+        background: var(--ft-gray-1);
+        color: var(--ft-gray-4);
+      }
+
+      .input:focus-visible,
+      .select:focus-visible {
+        border-color: var(--ft-blue);
+      }
+
+      .mono {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.88em;
+      }
+
+      .button {
+        min-height: 44px;
+        padding: 10px 17px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-weight: 700;
+        line-height: 1.2;
+        transition: background 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.52;
+      }
+
+      .button.primary {
+        border-color: var(--ft-blue);
+        background: var(--ft-blue);
+        color: #ffffff;
+      }
+
+      .button.primary:not(:disabled):hover {
+        border-color: var(--ft-blue-dark);
+        background: var(--ft-blue-dark);
+      }
+
+      .button.secondary {
+        border-color: #aeb4b7;
+        background: #ffffff;
+        color: var(--ft-gray);
+      }
+
+      .button.secondary:not(:disabled):hover {
+        background: var(--ft-gray-1);
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 28px;
+        padding: 5px 10px;
+        border: 1px solid var(--ft-gray-1);
+        border-radius: 999px;
+        background: var(--ft-gray-1);
+        color: var(--ft-gray-4);
+        font-size: 0.75rem;
+        font-weight: 750;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .pill.ok {
+        border-color: var(--ft-teal-soft);
+        background: var(--ft-teal-soft);
+        color: var(--ft-teal-dark);
+      }
+
+      .pill.warn {
+        border-color: #e2e5e6;
+        background: #f5f6f7;
+        color: var(--ft-gray-4);
+      }
+
+      .pill.danger {
+        border-color: #f1d5dd;
+        background: #f7e9ed;
+        color: var(--ft-maroon);
+      }
+
+      .selected-agent {
+        display: grid;
+        gap: 6px;
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--ft-teal);
+        border-radius: var(--radius-sm);
+        background: #f4f7f7;
+      }
+
+      .user-name,
+      .call-title {
+        overflow-wrap: anywhere;
+        color: var(--ft-gray);
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1.25;
+      }
+
+      .meta {
+        overflow-wrap: anywhere;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      .switch-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+        color: var(--ft-gray);
+        font-size: 0.9rem;
+        font-weight: 700;
+      }
+
+      .switch-row input {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--ft-blue);
+      }
+
+      .list {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+      }
+
+      .user-row,
+      .call-row,
+      .event-row {
+        position: relative;
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border-bottom: 1px solid var(--ft-gray-1);
+        background: #ffffff;
+      }
+
+      .user-row:last-child,
+      .call-row:last-child,
+      .event-row:last-child {
+        border-bottom: 0;
+      }
+
+      .user-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+      }
+
+      .user-row.selected {
+        background: #fbfcff;
+      }
+
+      .user-row.selected::before {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 4px;
+        background: var(--ft-blue);
+        content: "";
+      }
+
+      .call-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+      }
+
+      .event-row {
+        border-left: 4px solid var(--ft-gray-4);
+      }
+
+      .event-row.monitor-ok {
+        border-left-color: var(--ft-teal);
+      }
+
+      .event-row.monitor-warn {
+        border-left-color: var(--ft-gray-4);
+      }
+
+      .event-row.monitor-fail {
+        border-left-color: var(--ft-maroon);
+      }
+
+      .status-dot {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        margin-right: 7px;
+        border-radius: 50%;
+        background: var(--ft-gray-3);
+      }
+
+      .status-dot.ok {
+        background: var(--ft-teal);
+      }
+
+      .status-dot.warn {
+        background: var(--ft-gray-4);
+      }
+
+      .status-dot.danger {
+        background: var(--ft-maroon);
+      }
+
+      .status-dot.idle {
+        background: var(--ft-gray-3);
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px 18px;
+      }
+
+      .kv div {
+        min-width: 0;
+      }
+
+      .kv .label {
+        margin-bottom: 3px;
+      }
+
+      .kv .value {
+        overflow-wrap: anywhere;
+        color: var(--ft-gray);
+        font-size: 0.82rem;
+      }
+
+      .inline-controls {
+        justify-content: flex-end;
+      }
+
+      .event-time {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .log {
+        max-height: 280px;
+        margin: 0;
+        overflow: auto;
+        padding: 14px;
+        border-left: 4px solid var(--ft-teal);
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+        background: #f4f7f7;
+        color: var(--ft-gray);
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.76rem;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .empty-state {
+        padding: 54px 24px;
+        color: var(--muted);
+        font-size: 0.92rem;
+        text-align: center;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .footer-note {
+        margin: -4px 2px 0;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      @media (max-width: 1080px) {
+        .metric-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .settings-card .form-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 820px) {
+        .site-header-inner {
+          width: min(100% - 32px, var(--content-width));
+          padding: 18px 0;
+        }
+
+        main {
+          width: min(100% - 32px, var(--content-width));
+          padding-top: 30px;
+        }
+
+        .page-heading,
+        .layout {
+          grid-template-columns: 1fr;
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .heading-actions {
+          justify-content: flex-start;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .site-header-inner,
+        .brand-block {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .site-header-inner {
+          gap: 14px;
+        }
+
+        .brand-block {
+          gap: 8px;
+        }
+
+        .brand-divider {
+          display: none;
+        }
+
+        .session-summary {
+          min-width: 0;
+          max-width: 100%;
+          text-align: left;
+        }
+
+        .session-summary strong {
+          white-space: normal;
+        }
+
+        .metric-grid,
+        .form-grid,
+        .settings-card .form-grid,
+        .kv,
+        .user-row,
+        .call-row {
+          grid-template-columns: 1fr;
+        }
+
+        .metric-grid {
+          gap: 12px;
+        }
+
+        .card {
+          padding: 20px;
+        }
+
+        .section-head {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 12px;
+          margin: -20px -20px 20px;
+          padding: 18px 20px 16px;
+        }
+
+        .page-heading,
+        .heading-actions,
+        .controls,
+        .inline-controls {
+          align-items: stretch;
+          width: 100%;
+        }
+
+        .heading-actions,
+        .controls,
+        .inline-controls {
+          flex-direction: column;
+        }
+
+        .button {
+          width: 100%;
+        }
+
+        .switch-row {
+          justify-content: center;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <a class="skip-link" href="#mainContent">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="site-header-inner">
+        <div class="brand-block" aria-label="Application identity">
+          <div class="brand-name">Franklin Templeton</div>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <div class="product-lockup">
+            <div class="product-name">Supervisor Auto Monitor</div>
+            <div class="product-meta">Genesys Cloud secure application</div>
+          </div>
+        </div>
+
+        <div class="session-summary" aria-live="polite">
+          <strong>Supervisor workspace</strong>
+          <span>Genesys Cloud monitoring</span>
+        </div>
+      </div>
+    </header>
+
+    <main id="mainContent" tabindex="-1">
+      <div class="page-heading">
+        <div class="page-heading-copy">
+          <p class="eyebrow">Genesys Cloud</p>
+          <h1>Supervisor Auto Monitor</h1>
+          <p>Select an agent, subscribe to their call conversations, and initiate monitor requests from the agent participant leg.</p>
+        </div>
+        <div class="heading-actions">
+          <button id="loginButton" class="button primary" type="button">Log In</button>
+          <button id="reconnectButton" class="button secondary" type="button">Reconnect</button>
+          <button id="stopButton" class="button secondary" type="button">Stop</button>
+        </div>
+      </div>
+
+      <div id="bootError" class="boot-error" role="alert"></div>
+
+      <section class="metric-grid" aria-label="Monitoring summary">
+        <article class="metric-card">
+          <div class="label">Supervisor</div>
+          <div id="supervisorMetric" class="metric">-</div>
+        </article>
+        <article class="metric-card">
+          <div class="label">Selected Agent</div>
+          <div id="agentMetric" class="metric">-</div>
+        </article>
+        <article class="metric-card">
+          <div class="label">Active Calls</div>
+          <div id="activeCallsMetric" class="metric">0</div>
+        </article>
+        <article class="metric-card">
+          <div class="label">Monitor Attempts</div>
+          <div id="monitorAttemptsMetric" class="metric">0</div>
+        </article>
+      </section>
+
+      <div class="workspace">
+        <section class="card settings-card" aria-labelledby="settingsHeading">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Connection settings</p>
+              <h2 id="settingsHeading">Genesys Cloud</h2>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="regionInput">Region</label>
+              <input id="regionInput" class="input" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="clientIdInput">OAuth Client ID</label>
+              <input id="clientIdInput" class="input mono" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="redirectUrlInput">Redirect URL</label>
+              <input id="redirectUrlInput" class="input mono" autocomplete="off" />
+            </div>
+          </div>
+        </section>
+
+        <div class="layout">
+          <aside class="left-rail">
+            <section class="card" aria-labelledby="userSearchHeading">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Directory</p>
+                  <h2 id="userSearchHeading">User Search</h2>
+                </div>
+                <span id="directoryCount" class="pill">0 loaded</span>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="userSearchInput">Search users</label>
+                  <input id="userSearchInput" class="input" placeholder="Name, email, division, title" autocomplete="off" />
+                </div>
+              </div>
+              <div class="controls" style="margin-top: 20px">
+                <button id="loadUsersButton" class="button primary" type="button">Load Users</button>
+                <button id="loadAllUsersButton" class="button secondary" type="button">Load All</button>
+              </div>
+              <div id="usersContainer" class="list" style="margin-top: 20px">
+                <div class="empty-state">Log in, then load users.</div>
+              </div>
+            </section>
+
+            <section class="card" aria-labelledby="eventLogHeading">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Activity</p>
+                  <h2 id="eventLogHeading">Event Log</h2>
+                </div>
+                <button id="clearLogButton" class="button secondary" type="button">Clear</button>
+              </div>
+              <pre id="logArea" class="log">Waiting to start...</pre>
+            </section>
+          </aside>
+
+          <div class="main">
+            <section class="card" aria-labelledby="monitorControlHeading">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Live supervision</p>
+                  <h2 id="monitorControlHeading">Monitor Control</h2>
+                </div>
+                <span id="connectionPill" class="pill">Disconnected</span>
+              </div>
+              <div id="selectedAgentPanel" class="selected-agent" aria-live="polite">
+                <div class="label">Selected Agent</div>
+                <div class="user-name">No user selected</div>
+                <div class="meta">Choose a user from search results.</div>
+              </div>
+              <div class="pill-row">
+                <span id="channelPill" class="pill">No channel</span>
+                <span id="subscriptionPill" class="pill">No subscription</span>
+                <span id="autoPill" class="pill ok">Auto monitor on</span>
+              </div>
+              <div class="controls" style="margin-top: 20px">
+                <button id="startMonitoringButton" class="button primary" type="button">Start Monitoring</button>
+                <button id="stopMonitoringButton" class="button secondary" type="button">Stop Monitoring</button>
+                <label class="switch-row">
+                  <input id="autoMonitorToggle" type="checkbox" checked />
+                  <span>Auto monitor</span>
+                </label>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <section class="card" aria-labelledby="activeCallsHeading">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Current conversations</p>
+              <h2 id="activeCallsHeading">Active Calls</h2>
+            </div>
+            <span id="callCountPill" class="pill">0 calls</span>
+          </div>
+          <div id="callsContainer" class="list">
+            <div class="empty-state">Call conversations for the selected user will appear here.</div>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="monitorActivityHeading">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Monitoring history</p>
+              <h2 id="monitorActivityHeading">Monitor Activity</h2>
+            </div>
+            <span id="activityCountPill" class="pill">0 events</span>
+          </div>
+          <div id="activityContainer" class="list">
+            <div class="empty-state">Monitor attempts and call updates will appear here.</div>
+          </div>
+        </section>
+
+        <p class="footer-note">Monitoring actions use the permissions of the signed-in Genesys Cloud supervisor. Review connection details and selected-agent status before starting supervision.</p>
+      </div>
+    </main>
+
+<script>
+      'use strict'
+
+      function showBootError(message) {
+        const container = document.getElementById('bootError')
+        if (!container) return
+        container.textContent = message
+        container.classList.add('visible')
+      }
+
+      window.addEventListener('error', (event) => {
+        showBootError(`Page error: ${event.message || 'Unknown error'}`)
+      })
+
+      window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason
+        showBootError(`Page error: ${reason?.message || reason || 'Unhandled promise rejection'}`)
+      })
+
+      const defaultGenesysRegion = 'usw2.pure.cloud'
+      const defaultGenesysClientId = '409225b8-66a3-407c-92ad-fa386bad3e79'
+      const genesysSdkSources = [
+        'https://sdk-cdn.mypurecloud.com/javascript/latest/purecloud-platform-client-v2.min.js',
+        'https://cdn.jsdelivr.net/npm/purecloud-platform-client-v2@latest/dist/web/purecloud-platform-client-v2.min.js',
+        'https://unpkg.com/purecloud-platform-client-v2@latest/dist/web/purecloud-platform-client-v2.min.js'
+      ]
+
+      const state = {
+        platformClient: null,
+        client: null,
+        usersApi: null,
+        notificationsApi: null,
+        conversationsApi: null,
+        supervisor: null,
+        selectedUser: null,
+        channel: null,
+        webSocket: null,
+        subscribedTopics: new Set(),
+        users: [],
+        userPage: 0,
+        userPageCount: 0,
+        activeCalls: new Map(),
+        monitorAttempts: new Map(),
+        activity: [],
+        autoMonitor: true,
+        isLoggingIn: false,
+        loginPromise: null,
+        sdkLoadPromise: null,
+        isMonitoring: false,
+        reconnectTimer: null,
+        reconnectAttempt: 0
+      }
+
+      const $ = (id) => document.getElementById(id)
+
+      function getCurrentPageCallbackUrl() {
+        const callbackUrl = new URL(window.location.href)
+        callbackUrl.hash = ''
+        return callbackUrl.toString()
+      }
+
+      function normalizeRegion(region) {
+        return String(region || '')
+          .trim()
+          .replace(/^https?:\/\//i, '')
+          .replace(/^login\./i, '')
+          .replace(/\/.*$/, '')
+      }
+
+      function readConfig() {
+        const url = new URL(window.location.href)
+        const region = normalizeRegion(url.searchParams.get('gc_region') || sessionStorage.getItem('gc_region') || $('regionInput').value || defaultGenesysRegion)
+        const clientId = url.searchParams.get('gc_clientId') || sessionStorage.getItem('gc_clientId') || $('clientIdInput').value || defaultGenesysClientId
+        const redirectUrl = url.searchParams.get('gc_redirectUrl') || sessionStorage.getItem('gc_redirectUrl') || $('redirectUrlInput').value || getCurrentPageCallbackUrl()
+
+        return { region, clientId, redirectUrl }
+      }
+
+      function writeConfig(config) {
+        $('regionInput').value = config.region
+        $('clientIdInput').value = config.clientId
+        $('redirectUrlInput').value = config.redirectUrl
+        sessionStorage.setItem('gc_region', config.region)
+        sessionStorage.setItem('gc_clientId', config.clientId)
+        sessionStorage.setItem('gc_redirectUrl', config.redirectUrl)
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;')
+      }
+
+      function nowLabel() {
+        return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      }
+
+      function shortId(id) {
+        if (!id) return '-'
+        const text = String(id)
+        return text.length > 12 ? `${text.slice(0, 8)}...${text.slice(-4)}` : text
+      }
+
+      function log(message) {
+        const area = $('logArea')
+        if (area.textContent === 'Waiting to start...') area.textContent = ''
+        area.textContent = `[${nowLabel()}] ${message}\n${area.textContent}`.trim()
+      }
+
+      function addActivity(type, title, details = {}) {
+        state.activity.unshift({
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          type,
+          title,
+          details,
+          createdAt: new Date()
+        })
+        state.activity = state.activity.slice(0, 80)
+        renderActivity()
+      }
+
+      function wait(ms) {
+        return new Promise((resolve) => window.setTimeout(resolve, ms))
+      }
+
+      function getGenesysPlatformClient() {
+        if (window.platformClient?.ApiClient) {
+          return { sdk: window.platformClient, source: 'window.platformClient' }
+        }
+
+        const loaders = []
+        if (typeof window.require === 'function') loaders.push(window.require)
+        if (typeof require === 'function' && require !== window.require) loaders.push(require)
+
+        for (const loader of loaders) {
+          try {
+            const sdk = loader('platformClient')
+            if (sdk?.ApiClient) {
+              return { sdk, source: "require('platformClient')" }
+            }
+          } catch (err) {
+            // Some pages define require for other module systems. Ignore those and keep checking.
+          }
+        }
+
+        return null
+      }
+
+      async function waitForPlatformClient(timeoutMs = 1500) {
+        const startedAt = Date.now()
+        while (Date.now() - startedAt < timeoutMs) {
+          if (getGenesysPlatformClient()?.sdk) return true
+          await wait(50)
+        }
+        return Boolean(getGenesysPlatformClient()?.sdk)
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = src
+          script.async = true
+          script.onload = () => resolve(src)
+          script.onerror = () => reject(new Error(`Unable to load ${src}`))
+          document.head.appendChild(script)
+        })
+      }
+
+      async function loadGenesysSdk() {
+        if (getGenesysPlatformClient()?.sdk) return
+
+        if (state.sdkLoadPromise) {
+          await state.sdkLoadPromise
+          return
+        }
+
+        state.sdkLoadPromise = (async () => {
+          if (await waitForPlatformClient(1800)) return
+
+          for (const src of genesysSdkSources) {
+            try {
+              const host = new URL(src).host
+              log(`Loading Genesys Cloud SDK from ${host}`)
+              await loadScript(src)
+              if (await waitForPlatformClient(800)) return
+            } catch (err) {
+              console.warn('Genesys SDK load attempt failed', err)
+              log(`SDK load attempt failed: ${err.message || err}`)
+            }
+          }
+
+          throw new Error(
+            'Genesys Cloud JavaScript SDK could not be loaded. Check browser/network access to sdk-cdn.mypurecloud.com, cdn.jsdelivr.net, or unpkg.com.'
+          )
+        })()
+
+        try {
+          await state.sdkLoadPromise
+        } finally {
+          state.sdkLoadPromise = null
+        }
+      }
+
+      async function ensureSdk() {
+        await loadGenesysSdk()
+        const loadedSdk = getGenesysPlatformClient()
+
+        if (!loadedSdk?.sdk) {
+          throw new Error('Genesys Cloud JavaScript SDK is not loaded.')
+        }
+
+        if (state.platformClient) return
+
+        state.platformClient = loadedSdk.sdk
+        state.client = state.platformClient.ApiClient.instance
+        state.usersApi = new state.platformClient.UsersApi()
+        state.notificationsApi = new state.platformClient.NotificationsApi()
+        state.conversationsApi = new state.platformClient.ConversationsApi()
+        log(`Genesys Cloud SDK ready via ${loadedSdk.source}`)
+      }
+
+      async function login() {
+        if (state.supervisor && state.usersApi) return true
+        if (state.loginPromise) return state.loginPromise
+
+        state.isLoggingIn = true
+        state.loginPromise = (async () => {
+          try {
+            await ensureSdk()
+            const config = readConfig()
+            writeConfig(config)
+
+            state.client.setEnvironment(config.region)
+            state.client.setPersistSettings(true, '_gc_supervisor_auto_monitor_')
+
+            log('Starting Genesys Cloud PKCE login')
+            await state.client.loginPKCEGrant(config.clientId, config.redirectUrl, {})
+            state.supervisor = await state.usersApi.getUsersMe({})
+
+            log(`Authenticated as ${state.supervisor.name || state.supervisor.id}`)
+            renderAll()
+            return true
+          } catch (err) {
+            console.error('Login failed', err)
+            log(`Login failed: ${err.message || err}`)
+            return false
+          } finally {
+            state.isLoggingIn = false
+            state.loginPromise = null
+          }
+        })()
+
+        return state.loginPromise
+      }
+
+      function getUserSearchText(user) {
+        return [
+          user?.name,
+          user?.preferredName,
+          user?.email,
+          user?.username,
+          user?.title,
+          user?.division?.name,
+          user?.state
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+      }
+
+      async function loadUsersPage(nextPage) {
+        const loggedIn = await login()
+        if (!loggedIn) return
+        const pageNumber = nextPage || state.userPage + 1 || 1
+        const opts = {
+          pageSize: 150,
+          pageNumber,
+          expand: ['customAttributes', 'employerInfo']
+        }
+
+        log(`Loading users page ${pageNumber}`)
+        const response = await state.usersApi.getUsers(opts)
+        const incomingUsers = Array.isArray(response.entities) ? response.entities : []
+        const usersById = new Map(state.users.map((user) => [user.id, user]))
+
+        incomingUsers.forEach((user) => usersById.set(user.id, user))
+        state.users = Array.from(usersById.values()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+        state.userPage = response.pageNumber || pageNumber
+        state.userPageCount = response.pageCount || state.userPageCount || state.userPage
+
+        log(`Loaded ${incomingUsers.length} user(s) from page ${state.userPage}`)
+        renderUsers()
+        renderMetrics()
+      }
+
+      async function loadAllUsers() {
+        await loadUsersPage(state.userPage || 1)
+        const maxPages = Math.min(state.userPageCount || 1, 100)
+
+        for (let page = state.userPage + 1; page <= maxPages; page += 1) {
+          await loadUsersPage(page)
+        }
+
+        if (state.userPageCount > maxPages) {
+          log(`Stopped at ${maxPages} pages. Narrow the query or raise the cap in code for larger directories.`)
+        }
+      }
+
+      function selectUser(userId) {
+        const user = state.users.find((candidate) => candidate.id === userId)
+        if (!user) return
+
+        state.selectedUser = user
+        sessionStorage.setItem('gc_selected_user_id', user.id)
+        log(`Selected ${user.name || user.email || user.id}`)
+        renderAll()
+      }
+
+      async function ensureNotificationChannel() {
+        const storedChannelId = sessionStorage.getItem('gc_supervisor_monitor_channelid')
+        let channel = null
+
+        if (storedChannelId) {
+          try {
+            channel = await state.notificationsApi.getNotificationsChannel(storedChannelId)
+            log(`Reusing notification channel ${storedChannelId}`)
+          } catch (err) {
+            sessionStorage.removeItem('gc_supervisor_monitor_channelid')
+            log('Stored notification channel was unavailable')
+          }
+        }
+
+        if (!channel) {
+          channel = await state.notificationsApi.postNotificationsChannels()
+          sessionStorage.setItem('gc_supervisor_monitor_channelid', channel.id)
+          log(`Created notification channel ${channel.id}`)
+        }
+
+        state.channel = channel
+        renderConnectionState()
+        return channel
+      }
+
+      async function subscribeTopics(topics) {
+        const newTopics = topics.filter((topic) => topic && !state.subscribedTopics.has(topic))
+        if (!newTopics.length) return
+
+        await state.notificationsApi.postNotificationsChannelSubscriptions(
+          state.channel.id,
+          newTopics.map((topic) => ({ id: topic }))
+        )
+
+        newTopics.forEach((topic) => state.subscribedTopics.add(topic))
+        log(`Subscribed to ${newTopics.length} topic(s)`)
+        renderConnectionState()
+      }
+
+      async function replaceSubscriptions(topics) {
+        const subscriptions = topics.map((topic) => ({ id: topic }))
+
+        if (typeof state.notificationsApi.putNotificationsChannelSubscriptions === 'function') {
+          await state.notificationsApi.putNotificationsChannelSubscriptions(state.channel.id, subscriptions)
+          state.subscribedTopics = new Set(topics)
+          return true
+        }
+
+        return false
+      }
+
+      function closeWebSocket() {
+        if (!state.webSocket) return
+        try {
+          state.webSocket.intentionalClose = true
+          state.webSocket.close()
+        } catch (err) {
+          console.warn('Error closing websocket', err)
+        }
+        state.webSocket = null
+      }
+
+      function clearReconnectTimer() {
+        if (!state.reconnectTimer) return
+        window.clearTimeout(state.reconnectTimer)
+        state.reconnectTimer = null
+      }
+
+      function scheduleReconnect(reason) {
+        if (state.reconnectTimer || !state.isMonitoring) return
+
+        state.reconnectAttempt += 1
+        const delayMs = Math.min(30000, 1000 * 2 ** Math.min(state.reconnectAttempt - 1, 5))
+        log(`${reason}. Reconnecting in ${Math.round(delayMs / 1000)} second(s).`)
+
+        state.reconnectTimer = window.setTimeout(() => {
+          state.reconnectTimer = null
+          startMonitoring(true).catch((err) => log(`Reconnect failed: ${err.message || err}`))
+        }, delayMs)
+      }
+
+      async function connectWebSocket(channel) {
+        closeWebSocket()
+
+        const socket = new WebSocket(channel.connectUri)
+        state.webSocket = socket
+
+        socket.onopen = () => {
+          state.reconnectAttempt = 0
+          clearReconnectTimer()
+          log('Notification WebSocket connected')
+          renderConnectionState()
+        }
+
+        socket.onmessage = (event) => {
+          handleNotification(event).catch((err) => {
+            console.error('Notification handling error', err)
+            log(`Notification handling error: ${err.message || err}`)
+          })
+        }
+
+        socket.onerror = () => {
+          log('Notification WebSocket error')
+        }
+
+        socket.onclose = (event) => {
+          const closeLabel = event?.code ? `code ${event.code}${event.reason ? `: ${event.reason}` : ''}` : 'no close code'
+          log(`Notification WebSocket closed (${closeLabel})`)
+          renderConnectionState()
+
+          if (socket.intentionalClose || state.webSocket !== socket) return
+          scheduleReconnect('Notification WebSocket closed unexpectedly')
+        }
+      }
+
+      function getTargetTopics(userId) {
+        return [`v2.users.${userId}.conversations`, `v2.users.${userId}.conversations.summaries`]
+      }
+
+      async function startMonitoring(autoReconnect = false) {
+        const loggedIn = await login()
+        if (!loggedIn) return
+
+        if (!state.selectedUser) {
+          log('Select a user before starting monitoring')
+          return
+        }
+
+        state.isMonitoring = true
+        if (!autoReconnect) {
+          state.activeCalls.clear()
+          state.monitorAttempts.clear()
+          state.activity = []
+          renderCalls()
+          renderActivity()
+        }
+
+        const channel = await ensureNotificationChannel()
+        await connectWebSocket(channel)
+        await subscribeTopics(getTargetTopics(state.selectedUser.id))
+
+        addActivity('monitor-warn', 'Monitoring started', {
+          agent: state.selectedUser.name || state.selectedUser.email || state.selectedUser.id,
+          topics: getTargetTopics(state.selectedUser.id).join(', ')
+        })
+        log(`Monitoring ${state.selectedUser.name || state.selectedUser.id}`)
+        renderAll()
+      }
+
+      async function stopMonitoring() {
+        clearReconnectTimer()
+        state.isMonitoring = false
+        closeWebSocket()
+
+        if (state.channel && state.subscribedTopics.size) {
+          try {
+            await replaceSubscriptions([])
+            log('Cleared channel subscriptions')
+          } catch (err) {
+            log(`Could not clear subscriptions: ${err.message || err}`)
+          }
+        }
+
+        state.subscribedTopics.clear()
+        renderConnectionState()
+        addActivity('monitor-warn', 'Monitoring stopped')
+      }
+
+      function extractConversationId(details) {
+        return details?.eventBody?.id || details?.eventBody?.conversationId || extractConversationIdFromTopic(details?.topicName)
+      }
+
+      function extractConversationIdFromTopic(topicName) {
+        const parts = String(topicName || '').split('.')
+        const index = parts.findIndex((part) => part === 'conversations')
+        if (index > -1 && parts[index + 1]) return parts[index + 1]
+        return null
+      }
+
+      function isCallSession(session) {
+        const mediaType = String(session?.mediaType || session?.type || '').toLowerCase()
+        return (
+          mediaType === 'voice' ||
+          mediaType === 'call' ||
+          mediaType === 'callback' ||
+          Boolean(session?.ani || session?.dnis || session?.peerId || session?.remote)
+        )
+      }
+
+      function getCallSession(participant) {
+        const sessions = Array.isArray(participant?.sessions) ? participant.sessions : []
+        const calls = Array.isArray(participant?.calls)
+          ? participant.calls.map((call) => ({ ...call, mediaType: call.mediaType || 'voice' }))
+          : []
+
+        return [...sessions, ...calls].find(isCallSession) || null
+      }
+
+      function getParticipantUserId(participant) {
+        return participant?.userId || participant?.user?.id || participant?.user?.userId || null
+      }
+
+      function isSelectedUserParticipant(participant) {
+        return Boolean(participant?.id && getParticipantUserId(participant) === state.selectedUser?.id)
+      }
+
+      function getSessionState(session) {
+        return String(session?.state || session?.disconnectType || '').toLowerCase()
+      }
+
+      function isDisconnectedState(value) {
+        return ['disconnected', 'terminated', 'wrapup', 'complete', 'completed'].includes(String(value || '').toLowerCase())
+      }
+
+      function isMonitorableState(value) {
+        const normalized = String(value || '').toLowerCase()
+        return !normalized || ['connected', 'interacting', 'held', 'participant leg detected', 'unknown'].includes(normalized)
+      }
+
+      function findTargetParticipant(conversation) {
+        const participants = Array.isArray(conversation?.participants) ? conversation.participants : []
+        const targetUserId = state.selectedUser?.id
+        if (!targetUserId) return null
+
+        const userParticipants = participants.filter(isSelectedUserParticipant)
+        const userParticipantsWithCallDetails = userParticipants.filter((participant) => getCallSession(participant))
+        return (
+          userParticipantsWithCallDetails.find((participant) => String(participant?.purpose || '').toLowerCase() === 'agent') ||
+          userParticipants.find((participant) => String(participant?.purpose || '').toLowerCase() === 'agent') ||
+          userParticipantsWithCallDetails.find((participant) => !isDisconnectedState(getSessionState(getCallSession(participant)))) ||
+          userParticipants.find((participant) => !isDisconnectedState(participant?.state)) ||
+          userParticipants[0] ||
+          null
+        )
+      }
+
+      function getCallDirection(participant, session) {
+        return session?.direction || participant?.direction || 'unknown'
+      }
+
+      function updateActiveCall(conversation, participant) {
+        const conversationId = conversation?.id || conversation?.conversationId
+        if (!conversationId || !participant?.id) return null
+
+        const session = getCallSession(participant)
+        const sessionState = getSessionState(session)
+        const participantState = participant?.state || sessionState || 'participant leg detected'
+        const key = conversationId
+        const existing = state.activeCalls.get(key) || {}
+        const call = {
+          ...existing,
+          conversationId,
+          participantId: participant.id,
+          participantPurpose: participant.purpose || 'unknown',
+          userId: getParticipantUserId(participant) || state.selectedUser?.id,
+          direction: getCallDirection(participant, session),
+          ani: session?.ani || session?.remote || existing.ani || '',
+          dnis: session?.dnis || existing.dnis || '',
+          mediaType: session?.mediaType || (String(conversation?.address || '').startsWith('sip:') ? 'voice' : 'unknown'),
+          state: participantState,
+          sessionState,
+          disconnectType: session?.disconnectType || participant?.disconnectType || '',
+          inferredFromParticipantOnly: !session,
+          startedAt: existing.startedAt || conversation?.startTime || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          monitorKey: `${conversationId}:${participant.id}`
+        }
+
+        state.activeCalls.set(key, call)
+
+        if (isDisconnectedState(sessionState) || isDisconnectedState(participantState)) {
+          call.isEnded = true
+        }
+
+        return call
+      }
+
+      async function monitorCall(call, reason) {
+        const key = call.monitorKey
+        const existing = state.monitorAttempts.get(key)
+        if (existing?.status === 'success' || existing?.status === 'pending') return
+
+        const attempt = {
+          conversationId: call.conversationId,
+          participantId: call.participantId,
+          status: 'pending',
+          requestedAt: new Date().toISOString(),
+          reason
+        }
+        state.monitorAttempts.set(key, attempt)
+        renderCalls()
+        renderMetrics()
+
+        try {
+          log(`Requesting monitor for ${call.conversationId} / ${call.participantId}`)
+
+          let result
+          if (typeof state.conversationsApi.postConversationsCallParticipantMonitor === 'function') {
+            result = await state.conversationsApi.postConversationsCallParticipantMonitor(call.conversationId, call.participantId, {})
+          } else {
+            result = await state.client.callApi(
+              '/api/v2/conversations/calls/{conversationId}/participants/{participantId}/monitor',
+              'POST',
+              { conversationId: call.conversationId, participantId: call.participantId },
+              {},
+              {},
+              {},
+              {},
+              ['PureCloud OAuth'],
+              ['application/json'],
+              ['application/json'],
+              null
+            )
+          }
+
+          attempt.status = 'success'
+          attempt.completedAt = new Date().toISOString()
+          attempt.result = result
+          addActivity('monitor-ok', 'Monitor request accepted', {
+            conversationId: call.conversationId,
+            participantId: call.participantId,
+            reason
+          })
+          log(`Monitor request accepted for ${call.conversationId}`)
+        } catch (err) {
+          attempt.status = 'failed'
+          attempt.completedAt = new Date().toISOString()
+          attempt.error = err?.message || err?.body?.message || String(err)
+          addActivity('monitor-fail', 'Monitor request failed', {
+            conversationId: call.conversationId,
+            participantId: call.participantId,
+            error: attempt.error
+          })
+          console.error('Monitor request failed', err)
+          log(`Monitor request failed: ${attempt.error}`)
+        } finally {
+          renderCalls()
+          renderMetrics()
+        }
+      }
+
+      async function handleNotification(event) {
+        const details = JSON.parse(event.data)
+
+        if (details?.eventBody?.message === 'WebSocket Heartbeat') {
+          renderConnectionState()
+          return
+        }
+
+        const topicName = details?.topicName || ''
+        if (!topicName) return
+
+        if (topicName.endsWith('.conversations.summaries')) {
+          addActivity('monitor-warn', 'Conversation summary update', {
+            conversationId: extractConversationId(details) || '-',
+            topicName
+          })
+          return
+        }
+
+        if (!topicName.startsWith(`v2.users.${state.selectedUser?.id}.conversations`)) {
+          return
+        }
+
+        const conversation = details.eventBody || {}
+        const conversationId = extractConversationId(details)
+        const participant = findTargetParticipant(conversation)
+
+        if (!conversationId || !participant) {
+          addActivity('monitor-warn', 'Conversation update without target call leg', {
+            conversationId: conversationId || '-',
+            topicName
+          })
+          return
+        }
+
+        if (!conversation.id) conversation.id = conversationId
+        const call = updateActiveCall(conversation, participant)
+        renderCalls()
+        renderMetrics()
+
+        addActivity('monitor-warn', 'Call leg updated', {
+          conversationId: call.conversationId,
+          participantId: call.participantId,
+          state: call.sessionState || call.state,
+          direction: call.direction,
+          inferred: call.inferredFromParticipantOnly ? 'yes' : 'no'
+        })
+
+        if (state.autoMonitor && !call.isEnded && isMonitorableState(call.sessionState || call.state)) {
+          await monitorCall(call, 'automatic call notification')
+        }
+      }
+
+      function getMonitorAttempt(call) {
+        return state.monitorAttempts.get(call.monitorKey)
+      }
+
+      function getStatusClass(value) {
+        const normalized = String(value || '').toLowerCase()
+        if (['success', 'connected', 'interacting', 'held'].includes(normalized)) return 'ok'
+        if (['pending', 'alerting', 'dialing', 'contacting', 'offering'].includes(normalized)) return 'warn'
+        if (['failed', 'disconnected', 'terminated', 'wrapup', 'complete', 'completed'].includes(normalized)) return 'danger'
+        return 'idle'
+      }
+
+      function renderMetrics() {
+        $('supervisorMetric').textContent = state.supervisor?.name || state.supervisor?.email || '-'
+        $('agentMetric').textContent = state.selectedUser?.name || state.selectedUser?.email || '-'
+        $('activeCallsMetric').textContent = Array.from(state.activeCalls.values()).filter((call) => !call.isEnded).length
+        $('monitorAttemptsMetric').textContent = state.monitorAttempts.size
+        $('directoryCount').textContent = `${state.users.length} loaded`
+      }
+
+      function renderConnectionState() {
+        const socketState = state.webSocket?.readyState
+        const connected = socketState === WebSocket.OPEN
+        const connecting = socketState === WebSocket.CONNECTING
+        const connectionPill = $('connectionPill')
+        const channelPill = $('channelPill')
+        const subscriptionPill = $('subscriptionPill')
+        const autoPill = $('autoPill')
+
+        connectionPill.className = `pill ${connected ? 'ok' : connecting ? 'warn' : ''}`
+        connectionPill.textContent = connected ? 'Connected' : connecting ? 'Connecting' : 'Disconnected'
+        channelPill.textContent = state.channel?.id ? `Channel ${shortId(state.channel.id)}` : 'No channel'
+        subscriptionPill.className = `pill ${state.subscribedTopics.size ? 'ok' : ''}`
+        subscriptionPill.textContent = state.subscribedTopics.size ? `${state.subscribedTopics.size} subscription(s)` : 'No subscription'
+        autoPill.className = `pill ${state.autoMonitor ? 'ok' : 'warn'}`
+        autoPill.textContent = state.autoMonitor ? 'Auto monitor on' : 'Auto monitor off'
+      }
+
+      function renderSelectedAgent() {
+        const panel = $('selectedAgentPanel')
+        const user = state.selectedUser
+
+        if (!user) {
+          panel.innerHTML = `
+            <div class="label">Selected Agent</div>
+            <div class="user-name">No user selected</div>
+            <div class="meta">Choose a user from search results.</div>
+          `
+          return
+        }
+
+        panel.innerHTML = `
+          <div class="label">Selected Agent</div>
+          <div class="user-name">${escapeHtml(user.name || user.email || user.id)}</div>
+          <div class="meta">${escapeHtml(user.email || user.username || '')}</div>
+          <div class="pill-row">
+            <span class="pill">${escapeHtml(user.division?.name || 'No division')}</span>
+            <span class="pill">${escapeHtml(user.title || 'No title')}</span>
+            <span class="pill ${user.state === 'active' ? 'ok' : 'warn'}">${escapeHtml(user.state || 'unknown')}</span>
+          </div>
+        `
+      }
+
+      function renderUsers() {
+        const container = $('usersContainer')
+        const query = $('userSearchInput').value.trim().toLowerCase()
+        const users = state.users
+          .filter((user) => !query || getUserSearchText(user).includes(query))
+          .slice(0, 60)
+
+        if (!users.length) {
+          container.innerHTML = state.users.length
+            ? '<div class="empty-state">No loaded users match the current search.</div>'
+            : '<div class="empty-state">Log in, then load users.</div>'
+          renderMetrics()
+          return
+        }
+
+        container.innerHTML = users
+          .map((user) => {
+            const isSelected = user.id === state.selectedUser?.id
+            return `
+              <div class="user-row ${isSelected ? 'selected' : ''}">
+                <div>
+                  <div class="user-name">${escapeHtml(user.name || user.email || user.id)}</div>
+                  <div class="meta">${escapeHtml(user.email || user.username || '')}</div>
+                  <div class="pill-row">
+                    <span class="pill">${escapeHtml(user.division?.name || 'No division')}</span>
+                    <span class="pill">${escapeHtml(user.title || 'No title')}</span>
+                  </div>
+                </div>
+                <div>
+                  <button class="button ${isSelected ? 'secondary' : 'primary'}" type="button" data-user-id="${escapeHtml(user.id)}">${isSelected ? 'Selected' : 'Select'}</button>
+                </div>
+              </div>
+            `
+          })
+          .join('')
+
+        container.querySelectorAll('[data-user-id]').forEach((button) => {
+          button.addEventListener('click', () => selectUser(button.getAttribute('data-user-id')))
+        })
+
+        renderMetrics()
+      }
+
+      function renderCalls() {
+        const container = $('callsContainer')
+        const calls = Array.from(state.activeCalls.values()).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+        const activeCount = calls.filter((call) => !call.isEnded).length
+        $('callCountPill').textContent = `${activeCount} call${activeCount === 1 ? '' : 's'}`
+
+        if (!calls.length) {
+          container.innerHTML = '<div class="empty-state">Call conversations for the selected user will appear here.</div>'
+          return
+        }
+
+        container.innerHTML = calls
+          .map((call) => {
+            const attempt = getMonitorAttempt(call)
+            const stateLabel = call.sessionState || call.state || 'unknown'
+            const stateClass = getStatusClass(call.isEnded ? 'disconnected' : stateLabel)
+            const attemptClass = getStatusClass(attempt?.status)
+            return `
+              <div class="call-row">
+                <div>
+                  <div class="call-title">
+                    <span class="status-dot ${stateClass}"></span>${escapeHtml(stateLabel || 'unknown')}
+                    <span class="muted">/ ${escapeHtml(call.direction)}</span>
+                  </div>
+                  <div class="kv" style="margin-top: 10px">
+                    <div>
+                      <div class="label">Conversation ID</div>
+                      <div class="value mono">${escapeHtml(call.conversationId)}</div>
+                    </div>
+                    <div>
+                      <div class="label">Participant ID</div>
+                      <div class="value mono">${escapeHtml(call.participantId)}</div>
+                    </div>
+                    <div>
+                      <div class="label">ANI</div>
+                      <div class="value mono">${escapeHtml(call.ani || '-')}</div>
+                    </div>
+                    <div>
+                      <div class="label">DNIS</div>
+                      <div class="value mono">${escapeHtml(call.dnis || '-')}</div>
+                    </div>
+                  </div>
+                  <div class="pill-row">
+                    <span class="pill ${attemptClass}">Monitor: ${escapeHtml(attempt?.status || 'not requested')}</span>
+                    ${call.inferredFromParticipantOnly ? '<span class="pill warn">Participant-only event</span>' : ''}
+                    <span class="pill">${escapeHtml(call.mediaType || 'unknown')}</span>
+                    <span class="pill">Updated ${escapeHtml(new Date(call.updatedAt).toLocaleTimeString())}</span>
+                  </div>
+                </div>
+                <div class="inline-controls">
+                  <button class="button primary" type="button" data-monitor-key="${escapeHtml(call.monitorKey)}">Monitor</button>
+                </div>
+              </div>
+            `
+          })
+          .join('')
+
+        container.querySelectorAll('[data-monitor-key]').forEach((button) => {
+          button.addEventListener('click', () => {
+            const call = calls.find((candidate) => candidate.monitorKey === button.getAttribute('data-monitor-key'))
+            if (call) monitorCall(call, 'manual button').catch((err) => log(`Manual monitor failed: ${err.message || err}`))
+          })
+        })
+      }
+
+      function renderActivity() {
+        const container = $('activityContainer')
+        $('activityCountPill').textContent = `${state.activity.length} event${state.activity.length === 1 ? '' : 's'}`
+
+        if (!state.activity.length) {
+          container.innerHTML = '<div class="empty-state">Monitor attempts and call updates will appear here.</div>'
+          return
+        }
+
+        container.innerHTML = state.activity
+          .map((item) => {
+            const entries = Object.entries(item.details || {})
+            return `
+              <div class="event-row ${escapeHtml(item.type)}">
+                <div class="event-time">${escapeHtml(item.createdAt.toLocaleString())}</div>
+                <div class="user-name">${escapeHtml(item.title)}</div>
+                ${
+                  entries.length
+                    ? `<div class="kv">${entries
+                        .map(
+                          ([key, value]) => `
+                            <div>
+                              <div class="label">${escapeHtml(key)}</div>
+                              <div class="value mono">${escapeHtml(value)}</div>
+                            </div>
+                          `
+                        )
+                        .join('')}</div>`
+                    : ''
+                }
+              </div>
+            `
+          })
+          .join('')
+      }
+
+      function renderAll() {
+        renderMetrics()
+        renderConnectionState()
+        renderSelectedAgent()
+        renderUsers()
+        renderCalls()
+        renderActivity()
+      }
+
+      function bindEvents() {
+        $('loginButton').addEventListener('click', () => login())
+        $('reconnectButton').addEventListener('click', () => startMonitoring())
+        $('stopButton').addEventListener('click', () => stopMonitoring())
+        $('startMonitoringButton').addEventListener('click', () => startMonitoring())
+        $('stopMonitoringButton').addEventListener('click', () => stopMonitoring())
+        $('loadUsersButton').addEventListener('click', () => loadUsersPage().catch((err) => log(`Load users failed: ${err.message || err}`)))
+        $('loadAllUsersButton').addEventListener('click', () => loadAllUsers().catch((err) => log(`Load all users failed: ${err.message || err}`)))
+        $('userSearchInput').addEventListener('input', () => renderUsers())
+        $('clearLogButton').addEventListener('click', () => {
+          $('logArea').textContent = ''
+        })
+        $('autoMonitorToggle').addEventListener('change', (event) => {
+          state.autoMonitor = event.target.checked
+          renderConnectionState()
+        })
+        ;['regionInput', 'clientIdInput', 'redirectUrlInput'].forEach((id) => {
+          $(id).addEventListener('change', () => writeConfig(readConfig()))
+        })
+      }
+
+      window.addEventListener('load', () => {
+        const config = readConfig()
+        writeConfig(config)
+        bindEvents()
+        renderAll()
+
+        const selectedUserId = sessionStorage.getItem('gc_selected_user_id')
+        if (selectedUserId) {
+          log(`Previous selected user id: ${selectedUserId}. Load users to restore the selection.`)
+        }
+      })
+    </script>
+  </body>
 </html>
+
